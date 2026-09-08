@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 
-// Served from public/ — stable path in both dev and production (no Vite hash rename)
+// Served from public/ — stable URL in both dev and production
 const AUDIO_SRC = '/assets/The_Gentle_Observer.mp3';
 
 interface AudioContextType {
@@ -13,86 +13,82 @@ const AudioCtx = createContext<AudioContextType | null>(null);
 export function AudioProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-
-  // Whether the user has EXPLICITLY paused via the button — prevents
-  // the first-interaction handler from auto-resuming after a manual pause.
   const userPausedRef = useRef(false);
-
-  // Ref to the first-interaction cleanup so togglePlay can cancel it
-  // if the user's very first action is clicking the music button.
-  const removeFirstInteractionRef = useRef<(() => void) | null>(null);
+  const pendingPlayRef = useRef(false); // true while first-interaction is registered
 
   // ------------------------------------------------------------------
-  // Initialise audio once on mount
+  // Initialise audio element once on mount
   // ------------------------------------------------------------------
   useEffect(() => {
-    const audio = new Audio(AUDIO_SRC);
-    audio.loop    = true;
-    audio.volume  = 0.45;
+    const audio = new Audio();
+    audio.src    = AUDIO_SRC;
+    audio.loop   = true;
+    audio.volume = 0.45;
     audio.preload = 'auto';
     audioRef.current = audio;
 
     const onPlay  = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
+    const onError = (e: Event) => console.warn('[AEGIS audio] load error', e);
     audio.addEventListener('play',  onPlay);
     audio.addEventListener('pause', onPause);
+    audio.addEventListener('error', onError);
 
-    // ── Attempt 1: direct autoplay (succeeds in some environments) ──
+    // ── Attempt immediate autoplay ──
     audio.play()
-      .then(() => setIsPlaying(true))
+      .then(() => {
+        setIsPlaying(true);
+      })
       .catch(() => {
-        // ── Attempt 2: play on the user's very first interaction ──
-        // This fires before any element's onClick, so clicking "Enter AEGIS"
-        // or anything on the landing page starts the music automatically.
-        const onFirstInteraction = () => {
-          removeFirstInteractionRef.current = null; // already firing — clear ref
-          if (!userPausedRef.current && audioRef.current) {
-            audioRef.current.play().catch(() => {});
-          }
+        // Browser blocked autoplay — register first-interaction handlers.
+        // Using bubble phase so button's onClick fires first and can cancel
+        // these listeners to avoid the play→pause double-trigger race.
+        pendingPlayRef.current = true;
+
+        const startAudio = () => {
+          pendingPlayRef.current = false;
+          if (userPausedRef.current || !audioRef.current) return;
+          audioRef.current.play().catch(() => {});
         };
 
-        const cleanup = () => {
-          document.removeEventListener('click',      onFirstInteraction);
-          document.removeEventListener('touchstart', onFirstInteraction);
-          document.removeEventListener('keydown',    onFirstInteraction);
+        document.addEventListener('click',      startAudio, { once: true });
+        document.addEventListener('touchstart', startAudio, { once: true, passive: true });
+        document.addEventListener('keydown',    startAudio, { once: true });
+
+        // Store cleanup so togglePlay can cancel before double-firing
+        audioRef.current._pendingCleanup = () => {
+          document.removeEventListener('click',      startAudio);
+          document.removeEventListener('touchstart', startAudio);
+          document.removeEventListener('keydown',    startAudio);
+          pendingPlayRef.current = false;
         };
-
-        removeFirstInteractionRef.current = cleanup;
-
-        // Bubble phase (no capture) so button's onClick fires first,
-        // allowing togglePlay to cancel this listener before it double-triggers.
-        document.addEventListener('click',      onFirstInteraction, { once: true });
-        document.addEventListener('touchstart', onFirstInteraction, { once: true, passive: true });
-        document.addEventListener('keydown',    onFirstInteraction, { once: true });
       });
 
     return () => {
       audio.pause();
       audio.removeEventListener('play',  onPlay);
       audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('error', onError);
+      audio._pendingCleanup?.();
       audioRef.current = null;
-      // Remove pending first-interaction listeners if component unmounts early
-      removeFirstInteractionRef.current?.();
     };
   }, []);
 
   // ------------------------------------------------------------------
-  // Toggle — user explicitly starts or stops the music
+  // Toggle — explicit user action
   // ------------------------------------------------------------------
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
     if (audio.paused) {
-      // User wants to resume — cancel any pending first-interaction listener
-      // so it doesn't double-trigger on the same click event.
-      removeFirstInteractionRef.current?.();
-      removeFirstInteractionRef.current = null;
+      // Cancel pending first-interaction listener so it doesn't double-fire
+      audio._pendingCleanup?.();
+      delete audio._pendingCleanup;
 
       userPausedRef.current = false;
       audio.play().catch(() => {});
     } else {
-      // User wants to pause
       userPausedRef.current = true;
       audio.pause();
     }
@@ -109,4 +105,11 @@ export function useAudio() {
   const ctx = useContext(AudioCtx);
   if (!ctx) throw new Error('useAudio must be used within an AudioProvider');
   return ctx;
+}
+
+// Augment HTMLAudioElement to allow the cleanup ref trick
+declare global {
+  interface HTMLAudioElement {
+    _pendingCleanup?: () => void;
+  }
 }
