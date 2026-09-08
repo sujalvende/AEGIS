@@ -5,95 +5,37 @@ interface AudioContextType {
   isPlaying: boolean;
   isMuted: boolean;
   volume: number;
-  currentTime: number;
-  duration: number;
   play: () => Promise<void>;
   pause: () => void;
-  stop: () => void;
-  replay: () => Promise<void>;
   togglePlay: () => Promise<void>;
-  setVolume: (v: number) => void;
-  toggleMute: () => void;
-  seek: (time: number) => void;
 }
 
 const AudioContext = createContext<AudioContextType | null>(null);
 
 export function AudioProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const userPausedRef = useRef<boolean>(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [volume, setVolumeState] = useState(0.5);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-
-  useEffect(() => {
-    // Initialize audio instance
-    const audio = new Audio(audioSrc);
-    audio.preload = 'auto';
-    audio.volume = volume;
-    audioRef.current = audio;
-
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    const onEnded = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
-    };
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const onLoadedMetadata = () => setDuration(audio.duration || 0);
-
-    audio.addEventListener('play', onPlay);
-    audio.addEventListener('pause', onPause);
-    audio.addEventListener('ended', onEnded);
-    audio.addEventListener('timeupdate', onTimeUpdate);
-    audio.addEventListener('loadedmetadata', onLoadedMetadata);
-
-    return () => {
-      audio.pause();
-      audio.removeEventListener('play', onPlay);
-      audio.removeEventListener('pause', onPause);
-      audio.removeEventListener('ended', onEnded);
-      audio.removeEventListener('timeupdate', onTimeUpdate);
-      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
-      audioRef.current = null;
-    };
-  }, []);
+  const [volume] = useState(0.5);
 
   const play = useCallback(async () => {
     if (!audioRef.current) return;
     try {
+      userPausedRef.current = false;
       await audioRef.current.play();
       setIsPlaying(true);
     } catch (err) {
-      console.warn('Playback prevented by browser autoplay policy:', err);
+      // Browser autoplay policy might block before interaction
+      console.warn('Playback waiting for user gesture:', err);
     }
   }, []);
 
   const pause = useCallback(() => {
     if (!audioRef.current) return;
+    userPausedRef.current = true;
     audioRef.current.pause();
     setIsPlaying(false);
-  }, []);
-
-  const stop = useCallback(() => {
-    if (!audioRef.current) return;
-    audioRef.current.pause();
-    audioRef.current.currentTime = 0;
-    setCurrentTime(0);
-    setIsPlaying(false);
-  }, []);
-
-  const replay = useCallback(async () => {
-    if (!audioRef.current) return;
-    audioRef.current.currentTime = 0;
-    setCurrentTime(0);
-    try {
-      await audioRef.current.play();
-      setIsPlaying(true);
-    } catch (err) {
-      console.warn('Replay error:', err);
-    }
   }, []);
 
   const togglePlay = useCallback(async () => {
@@ -105,30 +47,47 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isPlaying, pause, play]);
 
-  const setVolume = useCallback((v: number) => {
-    const clamped = Math.max(0, Math.min(1, v));
-    setVolumeState(clamped);
-    if (audioRef.current) {
-      audioRef.current.volume = clamped;
-    }
-    if (clamped > 0 && isMuted) {
-      setIsMuted(false);
-      if (audioRef.current) audioRef.current.muted = false;
-    }
-  }, [isMuted]);
+  useEffect(() => {
+    // Initialize audio instance
+    const audio = new Audio(audioSrc);
+    audio.preload = 'auto';
+    audio.loop = true;
+    audio.volume = volume;
+    audioRef.current = audio;
 
-  const toggleMute = useCallback(() => {
-    if (!audioRef.current) return;
-    const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    audioRef.current.muted = nextMuted;
-  }, [isMuted]);
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
 
-  const seek = useCallback((time: number) => {
-    if (!audioRef.current) return;
-    audioRef.current.currentTime = time;
-    setCurrentTime(time);
-  }, []);
+    // Attempt autoplay immediately
+    audio.play()
+      .then(() => {
+        setIsPlaying(true);
+      })
+      .catch(() => {
+        // If autoplay was blocked by browser policy, play on first user interaction anywhere
+        const startOnInteraction = () => {
+          if (!userPausedRef.current && audioRef.current) {
+            audioRef.current.play()
+              .then(() => setIsPlaying(true))
+              .catch(() => {});
+          }
+          window.removeEventListener('pointerdown', startOnInteraction);
+          window.removeEventListener('keydown', startOnInteraction);
+        };
+
+        window.addEventListener('pointerdown', startOnInteraction, { once: true });
+        window.addEventListener('keydown', startOnInteraction, { once: true });
+      });
+
+    return () => {
+      audio.pause();
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+      audioRef.current = null;
+    };
+  }, [volume]);
 
   return (
     <AudioContext.Provider
@@ -136,16 +95,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         isPlaying,
         isMuted,
         volume,
-        currentTime,
-        duration,
         play,
         pause,
-        stop,
-        replay,
         togglePlay,
-        setVolume,
-        toggleMute,
-        seek,
       }}
     >
       {children}
