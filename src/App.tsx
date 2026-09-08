@@ -13,6 +13,9 @@ import { Admin } from './pages/Admin';
 import { Settings } from './pages/Settings';
 import { ResponderDeviceModal } from './components/demo/ResponderDeviceModal';
 
+import { AudioProvider } from './context/AudioContext';
+import { FloatingMusicPlayer } from './components/audio/MusicController';
+
 function Router() {
   const { state } = useAegis();
   const [isResponderRoute, setIsResponderRoute] = useState(window.location.hash === '#responder');
@@ -54,7 +57,10 @@ function Router() {
 export default function App() {
   return (
     <AegisProvider>
-      <Router />
+      <AudioProvider>
+        <Router />
+        <FloatingMusicPlayer />
+      </AudioProvider>
     </AegisProvider>
   );
 }

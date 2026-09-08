@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAegis } from '../store/AegisContext';
+import { HeaderMusicControl } from '../components/audio/MusicController';
 
 function HeroCanvas() {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -178,6 +179,7 @@ export function Landing() {
             <span className="text-[9px] font-mono text-[#475569] tracking-widest hidden sm:block">AI EMERGENCY GUARDIAN</span>
           </div>
           <div className="flex items-center gap-3">
+            <HeaderMusicControl />
             <button
               onClick={() => { setMode('demo'); navigate('monitor'); }}
               className="px-4 py-2 text-[10px] font-mono tracking-widest uppercase text-[#f59e0b] border border-[#f59e0b]/30 bg-[#f59e0b]/5 hover:bg-[#f59e0b]/10 transition-all rounded-sm"

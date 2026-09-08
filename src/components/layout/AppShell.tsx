@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAegis } from '../../store/AegisContext';
 import type { AppPage } from '../../types';
+import { HeaderMusicControl } from '../audio/MusicController';
 
 const NAV_ITEMS: { id: AppPage; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overview', icon: '⬡' },
@@ -151,7 +152,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           {/* Status strip */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <HeaderMusicControl />
             {hasEmergency && (
               <div className="flex items-center gap-1.5 text-[#f43f5e] animate-pulse">
                 <span className="text-[9px] font-mono tracking-widest">⚠ EMERGENCY ACTIVE</span>
